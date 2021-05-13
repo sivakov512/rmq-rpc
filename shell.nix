@@ -2,6 +2,10 @@
 
 pkgs.mkShell {
   buildInputs = with pkgs; [
+    # needed to compile openssl-sys crate
+    pkg-config
+    openssl
+
     (latest.rustChannels.stable.rust.override {
       extensions = ["rust-src"];
     })
