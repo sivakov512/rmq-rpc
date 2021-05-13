@@ -113,8 +113,9 @@ mod send_message {
             .await
             .unwrap();
 
-        let client = RmqRpcClient::connect(URL).await.unwrap();
-        client
+        RmqRpcClient::connect(URL)
+            .await
+            .unwrap()
             .declare_queue(QUEUE)
             .await
             .unwrap()
@@ -140,8 +141,9 @@ mod send_message {
             .await
             .unwrap();
 
-        let client = RmqRpcClient::connect(URL).await.unwrap();
-        client
+        RmqRpcClient::connect(URL)
+            .await
+            .unwrap()
             .declare_queue(QUEUE)
             .await
             .unwrap()
