@@ -1,9 +1,12 @@
 use futures_util::stream::StreamExt;
 use lapin::{
+    message::Delivery,
     options::{BasicConsumeOptions, BasicPublishOptions, QueueDeclareOptions},
     types::FieldTable,
     BasicProperties, Channel, Connection, ConnectionProperties,
 };
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio_amqp::*;
 
 #[derive(Debug)]
@@ -11,14 +14,17 @@ pub struct RmqRpcClient {
     conn: Connection,
     channel: Channel,
     fast_reply_task: tokio::task::JoinHandle<()>,
+    replies: Arc<Mutex<Vec<Delivery>>>,
 }
 
 impl RmqRpcClient {
     pub async fn connect(url: &str) -> Result<Self, lapin::Error> {
         let conn = Connection::connect(url, ConnectionProperties::default().with_tokio()).await?;
         let channel = conn.create_channel().await?;
+        let replies = Arc::new(Mutex::new(Vec::new()));
 
         let cloned_channel = channel.clone();
+        let cloned_replies = replies.clone();
         let fast_reply_task = tokio::spawn(async move {
             let mut consumer = cloned_channel
                 .basic_consume(
@@ -33,7 +39,9 @@ impl RmqRpcClient {
                 .await
                 .unwrap();
             while let Some(delivery) = consumer.next().await {
-                dbg!(delivery.unwrap());
+                let (_, delivery) = delivery.unwrap();
+
+                cloned_replies.lock().await.push(delivery);
             }
         });
 
@@ -41,6 +49,7 @@ impl RmqRpcClient {
             conn,
             channel,
             fast_reply_task,
+            replies,
         })
     }
 
@@ -165,5 +174,54 @@ mod send_message {
             .unwrap()
             .to_string()
             .contains("amq.rabbitmq.reply-to"));
+    }
+
+    #[tokio::test]
+    async fn store_replies_inside() {
+        const QUEUE: &str = "store_replies_inside";
+        const PING: &str = "Ping";
+        const PONG: &str = "Pong";
+        let channel = create_channel().await;
+        channel
+            .queue_delete(QUEUE, lapin::options::QueueDeleteOptions::default())
+            .await
+            .unwrap();
+
+        let client = RmqRpcClient::connect(URL).await.unwrap();
+        client
+            .declare_queue(QUEUE)
+            .await
+            .unwrap()
+            .send_message(QUEUE, PING.as_bytes().to_vec())
+            .await
+            .unwrap();
+
+        let msg = channel
+            .basic_get(QUEUE, lapin::options::BasicGetOptions::default())
+            .await
+            .unwrap()
+            .unwrap();
+        let reply_to = msg
+            .delivery
+            .properties
+            .reply_to()
+            .clone()
+            .unwrap()
+            .to_string();
+        channel
+            .basic_publish(
+                "",
+                &reply_to,
+                BasicPublishOptions::default(),
+                PONG.as_bytes().to_vec(),
+                BasicProperties::default(),
+            )
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let mut replies = client.replies.lock().await;
+        assert_eq!(replies.len(), 1);
+        assert_eq!(String::from_utf8_lossy(&replies.pop().unwrap().data), PONG);
     }
 }
