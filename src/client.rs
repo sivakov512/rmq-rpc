@@ -5,6 +5,7 @@ use lapin::{
     types::FieldTable,
     BasicProperties, Channel, Connection, ConnectionProperties,
 };
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_amqp::*;
@@ -15,14 +16,14 @@ pub struct RmqRpcClient {
     conn: Connection,
     channel: Channel,
     fast_reply_task: tokio::task::JoinHandle<()>,
-    replies: Arc<Mutex<Vec<Delivery>>>,
+    replies: Arc<Mutex<BTreeMap<String, Delivery>>>,
 }
 
 impl RmqRpcClient {
     pub async fn connect(url: &str) -> Result<Self, lapin::Error> {
         let conn = Connection::connect(url, ConnectionProperties::default().with_tokio()).await?;
         let channel = conn.create_channel().await?;
-        let replies = Arc::new(Mutex::new(Vec::new()));
+        let replies = Arc::new(Mutex::new(BTreeMap::new()));
 
         let cloned_channel = channel.clone();
         let cloned_replies = replies.clone();
@@ -42,7 +43,10 @@ impl RmqRpcClient {
             while let Some(delivery) = consumer.next().await {
                 let (_, delivery) = delivery.unwrap();
 
-                cloned_replies.lock().await.push(delivery);
+                match delivery.properties.correlation_id() {
+                    None => None, // TODO: log this situation or support deliveries without replies
+                    Some(v) => cloned_replies.lock().await.insert(v.to_string(), delivery),
+                };
             }
         });
 
@@ -208,8 +212,8 @@ mod send_message {
     }
 
     #[tokio::test]
-    async fn store_replies_inside() {
-        const QUEUE: &str = "store_replies_inside";
+    async fn store_replies_with_correlation_id_inside() {
+        const QUEUE: &str = "store_replies_with_correlation_id_inside";
         const PING: &str = "Ping";
         const PONG: &str = "Pong";
         let channel = create_channel().await;
@@ -232,17 +236,58 @@ mod send_message {
             .await
             .unwrap()
             .unwrap();
-        let reply_to = msg
-            .delivery
-            .properties
-            .reply_to()
-            .clone()
-            .unwrap()
-            .to_string();
         channel
             .basic_publish(
                 "",
-                &reply_to,
+                &msg.properties.reply_to().clone().unwrap().to_string(),
+                BasicPublishOptions::default(),
+                PONG.as_bytes().to_vec(),
+                BasicProperties::default()
+                    .with_correlation_id(msg.properties.correlation_id().clone().unwrap()),
+            )
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        let replies: Vec<String> = client
+            .replies
+            .lock()
+            .await
+            .values()
+            .map(|v| String::from_utf8_lossy(&v.data).to_string())
+            .collect();
+        assert_eq!(replies, vec![PONG]);
+    }
+
+    #[tokio::test]
+    async fn does_not_store_replies_without_correlation_id() {
+        const QUEUE: &str = "does_not_store_replies_without_correlation_id";
+        const PING: &str = "Ping";
+        const PONG: &str = "Pong";
+        let channel = create_channel().await;
+        channel
+            .queue_delete(QUEUE, lapin::options::QueueDeleteOptions::default())
+            .await
+            .unwrap();
+
+        let client = RmqRpcClient::connect(URL).await.unwrap();
+        client
+            .declare_queue(QUEUE)
+            .await
+            .unwrap()
+            .send_message(QUEUE, PING.as_bytes().to_vec())
+            .await
+            .unwrap();
+
+        let msg = channel
+            .basic_get(QUEUE, lapin::options::BasicGetOptions::default())
+            .await
+            .unwrap()
+            .unwrap();
+        channel
+            .basic_publish(
+                "",
+                &msg.properties.reply_to().clone().unwrap().to_string(),
                 BasicPublishOptions::default(),
                 PONG.as_bytes().to_vec(),
                 BasicProperties::default(),
@@ -250,9 +295,8 @@ mod send_message {
             .await
             .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        let mut replies = client.replies.lock().await;
-        assert_eq!(replies.len(), 1);
-        assert_eq!(String::from_utf8_lossy(&replies.pop().unwrap().data), PONG);
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        let replies = client.replies.lock().await;
+        assert_eq!(replies.len(), 0)
     }
 }
