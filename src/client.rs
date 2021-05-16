@@ -8,6 +8,7 @@ use lapin::{
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_amqp::*;
+use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct RmqRpcClient {
@@ -71,7 +72,9 @@ impl RmqRpcClient {
                 routing_key,
                 BasicPublishOptions::default(),
                 payload,
-                BasicProperties::default().with_reply_to("amq.rabbitmq.reply-to".into()),
+                BasicProperties::default()
+                    .with_reply_to("amq.rabbitmq.reply-to".into())
+                    .with_correlation_id(Uuid::new_v4().to_string().into()),
             )
             .await?;
         Ok(())
@@ -174,6 +177,34 @@ mod send_message {
             .unwrap()
             .to_string()
             .contains("amq.rabbitmq.reply-to"));
+    }
+
+    #[tokio::test]
+    async fn message_has_correlation_id() {
+        const QUEUE: &str = "message_has_correlation_id";
+        const DATA: &str = "Hello";
+        let channel = create_channel().await;
+        channel
+            .queue_delete(QUEUE, lapin::options::QueueDeleteOptions::default())
+            .await
+            .unwrap();
+
+        RmqRpcClient::connect(URL)
+            .await
+            .unwrap()
+            .declare_queue(QUEUE)
+            .await
+            .unwrap()
+            .send_message(QUEUE, DATA.as_bytes().to_vec())
+            .await
+            .unwrap();
+
+        let msg = channel
+            .basic_get(QUEUE, lapin::options::BasicGetOptions::default())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(msg.delivery.properties.correlation_id().is_some());
     }
 
     #[tokio::test]
