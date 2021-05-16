@@ -4,18 +4,19 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 use tokio::sync::Mutex;
 
+#[derive(Debug)]
 struct SharedState<T: Clone> {
     delivery: Option<T>,
     waker: Option<Waker>,
 }
 
-#[derive(Clone)]
-struct FutureRpcReply<T: Clone> {
+#[derive(Clone, Debug)]
+pub struct FutureRpcReply<T: Clone + std::fmt::Debug> {
     shared_state: Arc<Mutex<SharedState<T>>>,
 }
 
-impl<T: Clone> FutureRpcReply<T> {
-    fn new() -> Self {
+impl<T: Clone + std::fmt::Debug> FutureRpcReply<T> {
+    pub fn new() -> Self {
         let shared_state = Arc::new(Mutex::new(SharedState {
             delivery: None,
             waker: None,
@@ -23,7 +24,7 @@ impl<T: Clone> FutureRpcReply<T> {
         Self { shared_state }
     }
 
-    async fn resolve(self, delivery: T) {
+    pub async fn resolve(self, delivery: T) {
         let mut shared_state = self.shared_state.lock().await;
         shared_state.delivery = Some(delivery);
 
