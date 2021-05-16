@@ -122,72 +122,105 @@ mod send_message {
     use super::*;
 
     const URL: &str = "amqp://127.0.0.1:5672";
+    const PING: &str = "Ping";
+    const PONG: &str = "Pong";
 
-    async fn create_channel() -> Channel {
-        Connection::connect(URL, ConnectionProperties::default().with_tokio())
-            .await
-            .unwrap()
-            .create_channel()
-            .await
-            .unwrap()
+    struct TstQueue {
+        name: String,
+        channel: Channel,
+    }
+
+    impl TstQueue {
+        async fn new(name: &str) -> Self {
+            let channel = Connection::connect(URL, ConnectionProperties::default().with_tokio())
+                .await
+                .unwrap()
+                .create_channel()
+                .await
+                .unwrap();
+
+            channel
+                .queue_delete(name, lapin::options::QueueDeleteOptions::default())
+                .await
+                .unwrap();
+            channel
+                .queue_declare(
+                    name,
+                    lapin::options::QueueDeclareOptions::default(),
+                    lapin::types::FieldTable::default(),
+                )
+                .await
+                .unwrap();
+
+            Self {
+                name: name.to_owned(),
+                channel,
+            }
+        }
+
+        async fn get(&self) -> lapin::message::Delivery {
+            self.channel
+                .basic_get(&self.name, lapin::options::BasicGetOptions::default())
+                .await
+                .unwrap()
+                .unwrap()
+                .delivery
+        }
+
+        async fn publish(
+            &self,
+            routing_key: &str,
+            payload: Vec<u8>,
+            properties: lapin::BasicProperties,
+        ) {
+            self.channel
+                .basic_publish(
+                    "",
+                    routing_key,
+                    BasicPublishOptions::default(),
+                    payload,
+                    properties,
+                )
+                .await
+                .unwrap();
+        }
     }
 
     #[tokio::test]
     async fn message_sent() {
         const QUEUE: &str = "message_sent";
-        const DATA: &str = "Hello";
-        let channel = create_channel().await;
-        channel
-            .queue_delete(QUEUE, lapin::options::QueueDeleteOptions::default())
-            .await
-            .unwrap();
+        let queue = TstQueue::new(QUEUE).await;
         let client = RmqRpcClient::connect(URL).await.unwrap();
-        client.declare_queue(QUEUE).await.unwrap();
 
         tokio::spawn(async move {
             client
-                .send_message(QUEUE, DATA.as_bytes().to_vec())
+                .send_message(QUEUE, PING.as_bytes().to_vec())
                 .await
                 .unwrap();
         });
         tokio::time::sleep(std::time::Duration::from_millis(1)).await;
 
-        let msg = channel
-            .basic_get(QUEUE, lapin::options::BasicGetOptions::default())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(String::from_utf8_lossy(&msg.delivery.data), DATA.to_owned())
+        let delivery = queue.get().await;
+        assert_eq!(String::from_utf8_lossy(&delivery.data), PING.to_owned())
     }
 
     #[tokio::test]
     async fn message_has_reply_to_queue() {
         const QUEUE: &str = "message_has_reply_to_queue";
-        const DATA: &str = "Hello";
-        let channel = create_channel().await;
-        channel
-            .queue_delete(QUEUE, lapin::options::QueueDeleteOptions::default())
-            .await
-            .unwrap();
+        let queue = TstQueue::new(QUEUE).await;
         let client = RmqRpcClient::connect(URL).await.unwrap();
-        client.declare_queue(QUEUE).await.unwrap();
 
         tokio::spawn(async move {
             client
-                .send_message(QUEUE, DATA.as_bytes().to_vec())
+                .send_message(QUEUE, PING.as_bytes().to_vec())
                 .await
                 .unwrap();
         });
         tokio::time::sleep(std::time::Duration::from_millis(1)).await;
 
-        let msg = channel
-            .basic_get(QUEUE, lapin::options::BasicGetOptions::default())
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(msg.delivery.properties.reply_to().is_some());
-        assert!(msg
-            .delivery
+        let delivery = queue.get().await;
+        assert!(delivery.properties.reply_to().is_some());
+        assert!(delivery
             .properties
             .reply_to()
             .clone()
@@ -199,74 +232,50 @@ mod send_message {
     #[tokio::test]
     async fn message_has_correlation_id() {
         const QUEUE: &str = "message_has_correlation_id";
-        const DATA: &str = "Hello";
-        let channel = create_channel().await;
-        channel
-            .queue_delete(QUEUE, lapin::options::QueueDeleteOptions::default())
-            .await
-            .unwrap();
+        let queue = TstQueue::new(QUEUE).await;
         let client = RmqRpcClient::connect(URL).await.unwrap();
-        client.declare_queue(QUEUE).await.unwrap();
 
         tokio::spawn(async move {
             client
-                .send_message(QUEUE, DATA.as_bytes().to_vec())
+                .send_message(QUEUE, PONG.as_bytes().to_vec())
                 .await
                 .unwrap();
         });
         tokio::time::sleep(std::time::Duration::from_millis(1)).await;
 
-        let msg = channel
-            .basic_get(QUEUE, lapin::options::BasicGetOptions::default())
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(msg.delivery.properties.correlation_id().is_some());
+        let delivery = queue.get().await;
+        assert!(delivery.properties.correlation_id().is_some());
     }
 
     #[tokio::test]
     async fn returns_response() {
         const QUEUE: &str = "returns_response";
-        const PING: &str = "Ping";
-        const PONG: &str = "Pong";
-        let channel = create_channel().await;
-        let response: Arc<Mutex<Option<Delivery>>> = Arc::new(Mutex::new(None));
-        channel
-            .queue_delete(QUEUE, lapin::options::QueueDeleteOptions::default())
-            .await
-            .unwrap();
+        let queue = TstQueue::new(QUEUE).await;
+        let store: Arc<Mutex<Option<Delivery>>> = Arc::new(Mutex::new(None));
+        let store_cloned = store.clone();
 
         let client = RmqRpcClient::connect(URL).await.unwrap();
-        client.declare_queue(QUEUE).await.unwrap();
-        let response_cloned = response.clone();
         tokio::spawn(async move {
             let got = client
                 .send_message(QUEUE, PING.as_bytes().to_vec())
                 .await
                 .unwrap();
-            response_cloned.lock().await.replace(got);
+            store_cloned.lock().await.replace(got);
         });
         tokio::time::sleep(std::time::Duration::from_millis(1)).await;
 
-        let msg = channel
-            .basic_get(QUEUE, lapin::options::BasicGetOptions::default())
-            .await
-            .unwrap()
-            .unwrap();
-        channel
-            .basic_publish(
-                "",
-                &msg.properties.reply_to().clone().unwrap().to_string(),
-                BasicPublishOptions::default(),
+        let delivery = queue.get().await;
+        queue
+            .publish(
+                &delivery.properties.reply_to().clone().unwrap().to_string(),
                 PONG.as_bytes().to_vec(),
                 BasicProperties::default()
-                    .with_correlation_id(msg.properties.correlation_id().clone().unwrap()),
+                    .with_correlation_id(delivery.properties.correlation_id().clone().unwrap()),
             )
-            .await
-            .unwrap();
+            .await;
         tokio::time::sleep(std::time::Duration::from_millis(1)).await;
 
-        let got = response.lock().await;
+        let got = store.lock().await;
         assert!(got.is_some());
         assert_eq!(
             String::from_utf8_lossy(&(got.as_ref().unwrap().data)).to_string(),
