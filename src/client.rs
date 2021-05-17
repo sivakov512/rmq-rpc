@@ -132,7 +132,9 @@ mod send_message {
     }
 
     impl Queue {
-        async fn new(name: &'static str) -> Self {
+        async fn new() -> Self {
+            let name = Uuid::new_v4().to_string();
+
             let channel = Connection::connect(URL, ConnectionProperties::default().with_tokio())
                 .await
                 .unwrap()
@@ -141,12 +143,12 @@ mod send_message {
                 .unwrap();
 
             channel
-                .queue_delete(name, lapin::options::QueueDeleteOptions::default())
+                .queue_delete(&name, lapin::options::QueueDeleteOptions::default())
                 .await
                 .unwrap();
             channel
                 .queue_declare(
-                    name,
+                    &name,
                     lapin::options::QueueDeclareOptions::default(),
                     lapin::types::FieldTable::default(),
                 )
@@ -154,20 +156,21 @@ mod send_message {
                 .unwrap();
 
             Self {
-                name: name.to_owned(),
+                name,
                 channel,
                 processed_deliveries: Arc::new(Mutex::new(Vec::new())),
             }
         }
 
-        fn spawn_auto_reply(self) -> Self {
-            let clone = self.clone();
+        async fn with_auto_reply() -> Self {
+            let queue = Self::new().await;
+            let cloned = queue.clone();
 
             tokio::spawn(async move {
-                let mut consumer = clone
+                let mut consumer = cloned
                     .channel
                     .basic_consume(
-                        &clone.name,
+                        &cloned.name,
                         "",
                         BasicConsumeOptions {
                             no_ack: true,
@@ -180,14 +183,14 @@ mod send_message {
 
                 while let Some(delivery) = consumer.next().await {
                     let (_, delivery) = delivery.unwrap();
-                    clone
+                    cloned
                         .processed_deliveries
                         .lock()
                         .await
                         .push(delivery.clone());
 
                     let reply_to = delivery.properties.reply_to().clone().unwrap().to_string();
-                    clone
+                    cloned
                         .channel
                         .basic_publish(
                             "",
@@ -203,7 +206,7 @@ mod send_message {
                 }
             });
 
-            self
+            queue
         }
 
         async fn processed_deliveries(&self) -> Vec<Delivery> {
@@ -213,12 +216,11 @@ mod send_message {
 
     #[tokio::test]
     async fn message_sent() {
-        const QUEUE: &str = "message_sent";
-        let queue = Queue::new(QUEUE).await.spawn_auto_reply();
+        let queue = Queue::with_auto_reply().await;
         let client = RmqRpcClient::connect(URL).await.unwrap();
 
         client
-            .send_message(QUEUE, PING.as_bytes().to_vec())
+            .send_message(&queue.name, PING.as_bytes().to_vec())
             .await
             .unwrap();
 
@@ -228,12 +230,11 @@ mod send_message {
 
     #[tokio::test]
     async fn message_has_reply_to_queue() {
-        const QUEUE: &str = "message_has_reply_to_queue";
-        let queue = Queue::new(QUEUE).await.spawn_auto_reply();
+        let queue = Queue::with_auto_reply().await;
         let client = RmqRpcClient::connect(URL).await.unwrap();
 
         client
-            .send_message(QUEUE, PING.as_bytes().to_vec())
+            .send_message(&queue.name, PING.as_bytes().to_vec())
             .await
             .unwrap();
 
@@ -250,12 +251,11 @@ mod send_message {
 
     #[tokio::test]
     async fn message_has_correlation_id() {
-        const QUEUE: &str = "message_has_correlation_id";
-        let queue = Queue::new(QUEUE).await.spawn_auto_reply();
+        let queue = Queue::with_auto_reply().await;
         let client = RmqRpcClient::connect(URL).await.unwrap();
 
         client
-            .send_message(QUEUE, PONG.as_bytes().to_vec())
+            .send_message(&queue.name, PONG.as_bytes().to_vec())
             .await
             .unwrap();
 
@@ -265,11 +265,12 @@ mod send_message {
 
     #[tokio::test]
     async fn returns_response() {
-        const QUEUE: &str = "returns_response";
-        Queue::new(QUEUE).await.spawn_auto_reply();
+        let queue = Queue::with_auto_reply().await;
         let client = RmqRpcClient::connect(URL).await.unwrap();
 
-        let got = client.send_message(QUEUE, PING.as_bytes().to_vec()).await;
+        let got = client
+            .send_message(&queue.name, PING.as_bytes().to_vec())
+            .await;
 
         assert!(got.is_ok());
         assert_eq!(
