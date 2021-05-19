@@ -1,13 +1,19 @@
-{ pkgs ? import <nixpkgs> { overlays = [ (import (builtins.fetchTarball https://github.com/mozilla/nixpkgs-mozilla/archive/master.tar.gz)) ]; } }:
+{ pkgs ? import <nixpkgs> {} }:
+
+let
+  unstable = import (builtins.fetchTarball https://nixos.org/channels/nixos-unstable/nixexprs.tar.xz) {};
+in
 
 pkgs.mkShell {
   buildInputs = with pkgs; [
     # needed to compile openssl-sys crate
     pkg-config
     openssl
-
-    (latest.rustChannels.stable.rust.override {
-      extensions = ["rust-src"];
-    })
-  ];
+  ] ++ (with unstable; [
+    cargo
+    clippy
+    rust-analyzer
+    rustc
+    rustfmt
+  ]);
 }
