@@ -1,3 +1,6 @@
-pub mod client;
+mod client;
 mod reply;
-pub mod server;
+mod server;
+
+pub use client::RmqRpcClient;
+pub use server::RmqRpcServer;
