@@ -122,7 +122,7 @@ mod drain {
             .publish(
                 PING.as_bytes().to_vec(),
                 "correlation_id",
-                Some(&reply_queue.name),
+                &reply_queue.name,
             )
             .await;
         wait_a_moment().await;
@@ -153,7 +153,7 @@ mod drain {
             .publish(
                 PING.as_bytes().to_vec(),
                 "correlation_id",
-                Some(&reply_queue.name),
+                &reply_queue.name,
             )
             .await;
         wait_a_moment().await;
@@ -184,7 +184,7 @@ mod drain {
             .publish(
                 PING.as_bytes().to_vec(),
                 "correlation_id",
-                Some(&reply_queue.name),
+                &reply_queue.name,
             )
             .await;
         wait_a_moment().await;
@@ -217,7 +217,7 @@ mod drain {
             .publish(
                 PING.as_bytes().to_vec(),
                 "correlation_id",
-                Some(&reply_queue.name),
+                &reply_queue.name,
             )
             .await;
         assert_eq!(reply_queue.get().await, None)
