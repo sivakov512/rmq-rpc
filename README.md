@@ -1,5 +1,10 @@
 # rmq-rpc
-[![ci](https://github.com/sivakov512/rmq-rpc/actions/workflows/ci.yml/badge.svg)](https://github.com/sivakov512/rmq-rpc/actions/workflows/ci.yml)
+**Early release, not stable enough!**
+
+[![Build status](https://github.com/sivakov512/rmq-rpc/actions/workflows/test.yml/badge.svg)](https://github.com/sivakov512/rmq-rpc/actions/workflows/test.yml)
+[![Downloads](https://img.shields.io/crates/d/rmq-rpc.svg)](https://crates.io/crates/rmq-rpc)
+[![API Docs](https://docs.rs/rmq-rpc/badge.svg)](https://docs.rs/rmq-rpc)
+[![LICENSE](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Client\server for RPC via RabbitMQ
 
