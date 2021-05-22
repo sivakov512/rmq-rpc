@@ -23,7 +23,7 @@ impl RmqRpcServer {
 
     pub async fn drain<F, Fut, E>(&self, queue_name: &str, handler: F) -> Result<(), lapin::Error>
     where
-        F: Fn(&[u8]) -> Fut,
+        F: Fn(Vec<u8>) -> Fut,
         Fut: Future<Output = Result<Vec<u8>, E>>,
         E: std::error::Error,
     {
@@ -40,7 +40,7 @@ impl RmqRpcServer {
         while let Some(delivery) = consumer.next().await {
             let (_, delivery) = delivery?;
 
-            match handler(delivery.data.as_slice()).await {
+            match handler(delivery.data.clone()).await {
                 Ok(reply) => {
                     // TODO: do not reply if delivery has no reply_to or correlation_id
                     let reply_to = delivery.properties.reply_to().clone().unwrap();
