@@ -52,19 +52,24 @@ impl RmqRpcServer {
 
             match handler(delivery.data.clone()).await {
                 Ok(reply) => {
+                    //
                     // TODO: do not reply if delivery has no reply_to or correlation_id
-                    let reply_to = delivery.properties.reply_to().clone().unwrap();
                     let correlation_id = delivery.properties.correlation_id().clone().unwrap();
 
-                    self.channel
-                        .basic_publish(
-                            "",
-                            reply_to.as_str(),
-                            BasicPublishOptions::default(),
-                            reply,
-                            BasicProperties::default().with_correlation_id(correlation_id),
-                        )
-                        .await?;
+                    match delivery.properties.reply_to() {
+                        Some(reply_to) => {
+                            self.channel
+                                .basic_publish(
+                                    "",
+                                    reply_to.as_str(),
+                                    BasicPublishOptions::default(),
+                                    reply,
+                                    BasicProperties::default().with_correlation_id(correlation_id),
+                                )
+                                .await?;
+                        }
+                        None => (),
+                    }
 
                     delivery.ack(BasicAckOptions::default()).await?;
                 }
@@ -99,6 +104,7 @@ mod connect {
 mod drain {
     use super::*;
     use lapin::types::ShortString;
+    use std::sync::{Arc, Mutex};
     use test_utils::{wait_a_moment, Queue, PING, PONG, URL};
 
     #[tokio::test]
@@ -122,7 +128,7 @@ mod drain {
             .publish(
                 PING.as_bytes().to_vec(),
                 "correlation_id",
-                &reply_queue.name,
+                Some(&reply_queue.name),
             )
             .await;
         wait_a_moment().await;
@@ -153,7 +159,7 @@ mod drain {
             .publish(
                 PING.as_bytes().to_vec(),
                 "correlation_id",
-                &reply_queue.name,
+                Some(&reply_queue.name),
             )
             .await;
         wait_a_moment().await;
@@ -161,6 +167,29 @@ mod drain {
             reply_queue.get().await.unwrap().properties.correlation_id(),
             &Some(ShortString::from("correlation_id"))
         )
+    }
+
+    #[tokio::test]
+    async fn not_respond_if_reply_to_queue_not_specified() {
+        let queue = Queue::new().await;
+
+        let drain_queue = queue.name.clone();
+        let server = RmqRpcServer::connect(URL).await.unwrap();
+        tokio::spawn(async move {
+            server
+                .drain(&drain_queue, |_| async {
+                    let res: Result<Vec<u8>, std::io::Error> = Ok(PONG.as_bytes().to_vec());
+                    res
+                })
+                .await
+                .unwrap();
+        });
+
+        queue
+            .publish(PING.as_bytes().to_vec(), "correlation_id", None)
+            .await;
+        wait_a_moment().await;
+        assert_eq!(queue.get().await, None)
     }
 
     #[tokio::test]
@@ -184,7 +213,7 @@ mod drain {
             .publish(
                 PING.as_bytes().to_vec(),
                 "correlation_id",
-                &reply_queue.name,
+                Some(&reply_queue.name),
             )
             .await;
         wait_a_moment().await;
@@ -217,7 +246,7 @@ mod drain {
             .publish(
                 PING.as_bytes().to_vec(),
                 "correlation_id",
-                &reply_queue.name,
+                Some(&reply_queue.name),
             )
             .await;
         assert_eq!(reply_queue.get().await, None)

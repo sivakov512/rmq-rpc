@@ -51,16 +51,19 @@ impl Queue {
         }
     }
 
-    pub async fn publish(&self, payload: Vec<u8>, correlation_id: &str, reply_to: &str) {
+    pub async fn publish(&self, payload: Vec<u8>, correlation_id: &str, reply_to: Option<&str>) {
+        let mut properties = BasicProperties::default().with_correlation_id(correlation_id.into());
+        if let Some(reply_to) = reply_to {
+            properties = properties.with_reply_to(reply_to.into())
+        }
+
         self.channel
             .basic_publish(
                 "",
                 &self.name,
                 BasicPublishOptions::default(),
                 payload,
-                BasicProperties::default()
-                    .with_correlation_id(correlation_id.into())
-                    .with_reply_to(reply_to.into()),
+                properties,
             )
             .await
             .unwrap();
