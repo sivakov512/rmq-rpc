@@ -42,8 +42,10 @@ impl RmqRpcServer {
 
             match handler(delivery.data.as_slice()).await {
                 Ok(reply) => {
+                    // TODO: do not reply if delivery has no reply_to or correlation_id
                     let reply_to = delivery.properties.reply_to().clone().unwrap();
                     let correlation_id = delivery.properties.correlation_id().clone().unwrap();
+
                     self.channel
                         .basic_publish(
                             "",
@@ -53,6 +55,7 @@ impl RmqRpcServer {
                             BasicProperties::default().with_correlation_id(correlation_id),
                         )
                         .await?;
+
                     delivery.ack(BasicAckOptions::default()).await?;
                 }
                 Err(_) => delivery.reject(BasicRejectOptions::default()).await?,
