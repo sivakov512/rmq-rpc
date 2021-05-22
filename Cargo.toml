@@ -3,6 +3,10 @@ name = "rmq-rpc"
 version = "0.1.0"
 authors = ["Nikita Sivakov <sivakov512@gmail.com>"]
 edition = "2018"
+license-file = "LICENSE"
+description = "Client server for RPC via RabbitMQ"
+repository = "https://github.com/sivakov512/rmq-rpc"
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
