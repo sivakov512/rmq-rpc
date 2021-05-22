@@ -53,7 +53,7 @@ impl Queue {
 
     pub async fn publish(
         &self,
-        payload: Vec<u8>,
+        payload: &str,
         correlation_id: Option<&str>,
         reply_to: Option<&str>,
     ) {
@@ -70,7 +70,7 @@ impl Queue {
                 "",
                 &self.name,
                 BasicPublishOptions::default(),
-                payload,
+                payload.as_bytes().to_vec(),
                 properties,
             )
             .await
