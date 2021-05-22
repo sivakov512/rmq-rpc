@@ -52,23 +52,20 @@ impl RmqRpcServer {
 
             match handler(delivery.data.clone()).await {
                 Ok(reply) => {
-                    //
-                    // TODO: do not reply if delivery has no reply_to or correlation_id
-                    let correlation_id = delivery.properties.correlation_id().clone().unwrap();
-
-                    match delivery.properties.reply_to() {
-                        Some(reply_to) => {
-                            self.channel
-                                .basic_publish(
-                                    "",
-                                    reply_to.as_str(),
-                                    BasicPublishOptions::default(),
-                                    reply,
-                                    BasicProperties::default().with_correlation_id(correlation_id),
-                                )
-                                .await?;
-                        }
-                        None => (),
+                    if let (Some(reply_to), Some(correlation_id)) = (
+                        delivery.properties.reply_to(),
+                        delivery.properties.correlation_id(), // Because client require it
+                    ) {
+                        self.channel
+                            .basic_publish(
+                                "",
+                                reply_to.as_str(),
+                                BasicPublishOptions::default(),
+                                reply,
+                                BasicProperties::default()
+                                    .with_correlation_id(correlation_id.clone()),
+                            )
+                            .await?;
                     }
 
                     delivery.ack(BasicAckOptions::default()).await?;
@@ -104,7 +101,6 @@ mod connect {
 mod drain {
     use super::*;
     use lapin::types::ShortString;
-    use std::sync::{Arc, Mutex};
     use test_utils::{wait_a_moment, Queue, PING, PONG, URL};
 
     #[tokio::test]
@@ -127,7 +123,7 @@ mod drain {
         queue
             .publish(
                 PING.as_bytes().to_vec(),
-                "correlation_id",
+                Some("correlation_id"),
                 Some(&reply_queue.name),
             )
             .await;
@@ -158,7 +154,7 @@ mod drain {
         queue
             .publish(
                 PING.as_bytes().to_vec(),
-                "correlation_id",
+                Some("correlation_id"),
                 Some(&reply_queue.name),
             )
             .await;
@@ -186,7 +182,31 @@ mod drain {
         });
 
         queue
-            .publish(PING.as_bytes().to_vec(), "correlation_id", None)
+            .publish(PING.as_bytes().to_vec(), Some("correlation_id"), None)
+            .await;
+        wait_a_moment().await;
+        assert_eq!(queue.get().await, None)
+    }
+
+    #[tokio::test]
+    async fn not_respond_if_correlation_id_not_specified() {
+        let queue = Queue::new().await;
+        let reply_queue = Queue::new().await;
+
+        let drain_queue = queue.name.clone();
+        let server = RmqRpcServer::connect(URL).await.unwrap();
+        tokio::spawn(async move {
+            server
+                .drain(&drain_queue, |_| async {
+                    let res: Result<Vec<u8>, std::io::Error> = Ok(PONG.as_bytes().to_vec());
+                    res
+                })
+                .await
+                .unwrap();
+        });
+
+        queue
+            .publish(PING.as_bytes().to_vec(), None, Some(&reply_queue.name))
             .await;
         wait_a_moment().await;
         assert_eq!(queue.get().await, None)
@@ -212,7 +232,7 @@ mod drain {
         queue
             .publish(
                 PING.as_bytes().to_vec(),
-                "correlation_id",
+                Some("correlation_id"),
                 Some(&reply_queue.name),
             )
             .await;
@@ -245,7 +265,7 @@ mod drain {
         queue
             .publish(
                 PING.as_bytes().to_vec(),
-                "correlation_id",
+                Some("correlation_id"),
                 Some(&reply_queue.name),
             )
             .await;
