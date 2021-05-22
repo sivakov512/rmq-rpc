@@ -18,7 +18,9 @@ async fn handler(data: Vec<u8>) -> Result<Vec<u8>, Error> {
 #[tokio::main]
 async fn main() {
     env_logger::init();
+
     let server = RmqRpcServer::connect(URL).await.unwrap();
+    server.declare_queue(QUEUE_NAME).await.unwrap();
 
     log::info!("Running rpc server on \"{}\" queue", QUEUE_NAME);
     match server.drain(QUEUE_NAME, handler).await {

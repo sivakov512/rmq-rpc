@@ -1,6 +1,9 @@
 use futures_util::StreamExt;
 use lapin::{
-    options::{BasicAckOptions, BasicConsumeOptions, BasicPublishOptions, BasicRejectOptions},
+    options::{
+        BasicAckOptions, BasicConsumeOptions, BasicPublishOptions, BasicRejectOptions,
+        QueueDeclareOptions,
+    },
     types::FieldTable,
     BasicProperties, Channel, Connection, ConnectionProperties,
 };
@@ -19,6 +22,13 @@ impl RmqRpcServer {
         let channel = conn.create_channel().await?;
 
         Ok(Self { conn, channel })
+    }
+
+    pub async fn declare_queue(&self, queue: &str) -> Result<&Self, lapin::Error> {
+        self.channel
+            .queue_declare(queue, QueueDeclareOptions::default(), FieldTable::default())
+            .await?;
+        Ok(self)
     }
 
     pub async fn drain<F, Fut, E>(&self, queue_name: &str, handler: F) -> Result<(), lapin::Error>
