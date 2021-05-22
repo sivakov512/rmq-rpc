@@ -85,82 +85,8 @@ mod connect {
 #[cfg(test)]
 mod drain {
     use super::*;
-    use lapin::{
-        message::Delivery,
-        options::{BasicGetOptions, BasicPublishOptions},
-        types::ShortString,
-        BasicProperties,
-    };
-    use uuid::Uuid;
-
-    const URL: &str = "amqp://127.0.0.1:5672";
-    const PING: &str = "Ping";
-    const PONG: &str = "Pong";
-
-    #[derive(Clone)]
-    struct Queue {
-        name: String,
-        channel: Channel,
-    }
-
-    impl Queue {
-        async fn new() -> Self {
-            let name = Uuid::new_v4().to_string();
-
-            let channel = Connection::connect(URL, ConnectionProperties::default().with_tokio())
-                .await
-                .unwrap()
-                .create_channel()
-                .await
-                .unwrap();
-
-            channel
-                .queue_delete(&name, lapin::options::QueueDeleteOptions::default())
-                .await
-                .unwrap();
-            channel
-                .queue_declare(
-                    &name,
-                    lapin::options::QueueDeclareOptions::default(),
-                    lapin::types::FieldTable::default(),
-                )
-                .await
-                .unwrap();
-
-            Self { name, channel }
-        }
-
-        async fn publish(&self, payload: Vec<u8>, correlation_id: &str, reply_to: &str) {
-            self.channel
-                .basic_publish(
-                    "",
-                    &self.name,
-                    BasicPublishOptions::default(),
-                    payload,
-                    BasicProperties::default()
-                        .with_correlation_id(correlation_id.into())
-                        .with_reply_to(reply_to.into()),
-                )
-                .await
-                .unwrap();
-        }
-
-        async fn get(&self) -> Option<Delivery> {
-            match self
-                .channel
-                .basic_get(&self.name, BasicGetOptions::default())
-                .await
-                .unwrap()
-            {
-                Some(m) => Some(m.delivery),
-                None => None,
-            }
-        }
-    }
-
-    async fn wait_a_moment() {
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    use lapin::types::ShortString;
+    use test_utils::{wait_a_moment, Queue, PING, PONG, URL};
 
     #[tokio::test]
     async fn responds_handler_result_as_data() {
@@ -183,7 +109,7 @@ mod drain {
             .publish(
                 PING.as_bytes().to_vec(),
                 "correlation_id",
-                &reply_queue.name,
+                Some(&reply_queue.name),
             )
             .await;
         wait_a_moment().await;
@@ -214,7 +140,7 @@ mod drain {
             .publish(
                 PING.as_bytes().to_vec(),
                 "correlation_id",
-                &reply_queue.name,
+                Some(&reply_queue.name),
             )
             .await;
         wait_a_moment().await;
@@ -245,7 +171,7 @@ mod drain {
             .publish(
                 PING.as_bytes().to_vec(),
                 "correlation_id",
-                &reply_queue.name,
+                Some(&reply_queue.name),
             )
             .await;
         wait_a_moment().await;
@@ -278,7 +204,7 @@ mod drain {
             .publish(
                 PING.as_bytes().to_vec(),
                 "correlation_id",
-                &reply_queue.name,
+                Some(&reply_queue.name),
             )
             .await;
         assert_eq!(reply_queue.get().await, None)

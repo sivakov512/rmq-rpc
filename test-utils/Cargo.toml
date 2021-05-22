@@ -1,5 +1,5 @@
 [package]
-name = "rmq-rpc"
+name = "test-utils"
 version = "0.1.0"
 authors = ["Nikita Sivakov <sivakov512@gmail.com>"]
 edition = "2018"
@@ -12,6 +12,3 @@ lapin = "1.6"
 tokio = { version = "1", features = ["full"] }
 tokio-amqp = "1.0"
 uuid = { version = "0.8", features = ["v4"] }
-
-[dev-dependencies]
-test-utils = { path = "./test-utils" }
