@@ -103,29 +103,26 @@ mod drain {
     use lapin::types::ShortString;
     use test_utils::{wait_a_moment, Queue, PING, PONG, URL};
 
+    type HandlerRet = Result<Vec<u8>, std::io::Error>;
+
     #[tokio::test]
-    async fn responds_handler_result_as_data() {
+    async fn responds_with_handler_result() {
         let queue = Queue::new().await;
         let reply_queue = Queue::new().await;
+        let queue_to_drain = queue.name.clone();
 
-        let drain_queue = queue.name.clone();
         let server = RmqRpcServer::connect(URL).await.unwrap();
         tokio::spawn(async move {
             server
-                .drain(&drain_queue, |_| async {
-                    let res: Result<Vec<u8>, std::io::Error> = Ok(PONG.as_bytes().to_vec());
-                    res
+                .drain(&queue_to_drain, |_| async {
+                    Ok(PONG.as_bytes().to_vec()) as HandlerRet
                 })
                 .await
                 .unwrap();
         });
 
         queue
-            .publish(
-                PING.as_bytes().to_vec(),
-                Some("correlation_id"),
-                Some(&reply_queue.name),
-            )
+            .publish(PING, Some("correlation_id"), Some(&reply_queue.name))
             .await;
         wait_a_moment().await;
         assert_eq!(
@@ -135,28 +132,23 @@ mod drain {
     }
 
     #[tokio::test]
-    async fn responds_with_correlation_id() {
+    async fn response_has_correlation_id() {
         let queue = Queue::new().await;
         let reply_queue = Queue::new().await;
-
         let drain_queue = queue.name.clone();
         let server = RmqRpcServer::connect(URL).await.unwrap();
+
         tokio::spawn(async move {
             server
                 .drain(&drain_queue, |_| async {
-                    let res: Result<Vec<u8>, std::io::Error> = Ok(PONG.as_bytes().to_vec());
-                    res
+                    Ok(PONG.as_bytes().to_vec()) as HandlerRet
                 })
                 .await
                 .unwrap();
         });
 
         queue
-            .publish(
-                PING.as_bytes().to_vec(),
-                Some("correlation_id"),
-                Some(&reply_queue.name),
-            )
+            .publish(PING, Some("correlation_id"), Some(&reply_queue.name))
             .await;
         wait_a_moment().await;
         assert_eq!(
@@ -166,48 +158,42 @@ mod drain {
     }
 
     #[tokio::test]
-    async fn not_respond_if_reply_to_queue_not_specified() {
+    async fn not_responds_if_reply_to_is_not_specified() {
         let queue = Queue::new().await;
-
         let drain_queue = queue.name.clone();
         let server = RmqRpcServer::connect(URL).await.unwrap();
+
         tokio::spawn(async move {
             server
                 .drain(&drain_queue, |_| async {
-                    let res: Result<Vec<u8>, std::io::Error> = Ok(PONG.as_bytes().to_vec());
-                    res
+                    Ok(PONG.as_bytes().to_vec()) as HandlerRet
                 })
                 .await
                 .unwrap();
         });
 
-        queue
-            .publish(PING.as_bytes().to_vec(), Some("correlation_id"), None)
-            .await;
+        queue.publish(PING, Some("correlation_id"), None).await;
         wait_a_moment().await;
         assert_eq!(queue.get().await, None)
     }
 
     #[tokio::test]
-    async fn not_respond_if_correlation_id_not_specified() {
+    async fn not_responds_if_correlation_id_not_specified() {
         let queue = Queue::new().await;
         let reply_queue = Queue::new().await;
-
         let drain_queue = queue.name.clone();
         let server = RmqRpcServer::connect(URL).await.unwrap();
+
         tokio::spawn(async move {
             server
                 .drain(&drain_queue, |_| async {
-                    let res: Result<Vec<u8>, std::io::Error> = Ok(PONG.as_bytes().to_vec());
-                    res
+                    Ok(PONG.as_bytes().to_vec()) as HandlerRet
                 })
                 .await
                 .unwrap();
         });
 
-        queue
-            .publish(PING.as_bytes().to_vec(), None, Some(&reply_queue.name))
-            .await;
+        queue.publish(PING, None, Some(&reply_queue.name)).await;
         wait_a_moment().await;
         assert_eq!(queue.get().await, None)
     }
@@ -216,25 +202,20 @@ mod drain {
     async fn processed_message_acked() {
         let queue = Queue::new().await;
         let reply_queue = Queue::new().await;
-
         let drain_queue = queue.name.clone();
         let server = RmqRpcServer::connect(URL).await.unwrap();
+
         tokio::spawn(async move {
             server
                 .drain(&drain_queue, |_| async {
-                    let res: Result<Vec<u8>, std::io::Error> = Ok(PONG.as_bytes().to_vec());
-                    res
+                    Ok(PONG.as_bytes().to_vec()) as HandlerRet
                 })
                 .await
                 .unwrap();
         });
 
         queue
-            .publish(
-                PING.as_bytes().to_vec(),
-                Some("correlation_id"),
-                Some(&reply_queue.name),
-            )
+            .publish(PING, Some("correlation_id"), Some(&reply_queue.name))
             .await;
         wait_a_moment().await;
         assert_eq!(
@@ -263,11 +244,7 @@ mod drain {
         });
 
         queue
-            .publish(
-                PING.as_bytes().to_vec(),
-                Some("correlation_id"),
-                Some(&reply_queue.name),
-            )
+            .publish(PING, Some("correlation_id"), Some(&reply_queue.name))
             .await;
         assert_eq!(reply_queue.get().await, None)
     }
