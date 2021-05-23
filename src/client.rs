@@ -95,6 +95,23 @@ impl RmqRpcClient {
             .insert(correlation_id, reply_fut.clone());
         Ok(reply_fut.await)
     }
+
+    pub async fn send_message_without_reply(
+        &self,
+        routing_key: &str,
+        payload: Vec<u8>,
+    ) -> Result<(), lapin::Error> {
+        self.channel
+            .basic_publish(
+                "",
+                routing_key,
+                BasicPublishOptions::default(),
+                payload,
+                BasicProperties::default(),
+            )
+            .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -184,5 +201,56 @@ mod send_message {
             String::from_utf8_lossy(&got.unwrap().data).to_string(),
             PONG
         )
+    }
+}
+
+#[cfg(test)]
+mod send_message_without_reply {
+    use super::*;
+    use test_utils::{wait_a_moment, Queue, PING, PONG, URL};
+
+    #[tokio::test]
+    async fn message_sent() {
+        let queue = Queue::spawn_server(false).await;
+        let client = RmqRpcClient::connect(URL).await.unwrap();
+
+        client
+            .send_message_without_reply(&queue.name, PING.as_bytes().to_vec())
+            .await
+            .unwrap();
+
+        wait_a_moment().await;
+        let delivery = &queue.processed_deliveries().await[0];
+        assert_eq!(String::from_utf8_lossy(&delivery.data), PING.to_owned())
+    }
+
+    #[tokio::test]
+    async fn message_has_no_reply_to_queue() {
+        let queue = Queue::spawn_server(false).await;
+        let client = RmqRpcClient::connect(URL).await.unwrap();
+
+        client
+            .send_message_without_reply(&queue.name, PING.as_bytes().to_vec())
+            .await
+            .unwrap();
+
+        wait_a_moment().await;
+        let delivery = &queue.processed_deliveries().await[0];
+        assert!(delivery.properties.reply_to().is_none());
+    }
+
+    #[tokio::test]
+    async fn message_has_no_correlation_id() {
+        let queue = Queue::spawn_server(false).await;
+        let client = RmqRpcClient::connect(URL).await.unwrap();
+
+        client
+            .send_message_without_reply(&queue.name, PONG.as_bytes().to_vec())
+            .await
+            .unwrap();
+
+        wait_a_moment().await;
+        let delivery = &queue.processed_deliveries().await[0];
+        assert!(delivery.properties.correlation_id().is_none());
     }
 }
