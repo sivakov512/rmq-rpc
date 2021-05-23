@@ -136,6 +136,56 @@ impl Queue {
         queue
     }
 
+    pub async fn spawn_server(with_auto_reply: bool) -> Self {
+        let queue = Self::new().await;
+        let cloned = queue.clone();
+
+        tokio::spawn(async move {
+            let mut consumer = cloned
+                .channel
+                .basic_consume(
+                    &cloned.name,
+                    "",
+                    BasicConsumeOptions {
+                        no_ack: true,
+                        ..BasicConsumeOptions::default()
+                    },
+                    FieldTable::default(),
+                )
+                .await
+                .unwrap();
+
+            while let Some(delivery) = consumer.next().await {
+                let (_, delivery) = delivery.unwrap();
+                cloned
+                    .processed_deliveries
+                    .lock()
+                    .await
+                    .push(delivery.clone());
+
+                if with_auto_reply {
+                    let reply_to = delivery.properties.reply_to().clone().unwrap().to_string();
+
+                    cloned
+                        .channel
+                        .basic_publish(
+                            "",
+                            &reply_to,
+                            BasicPublishOptions::default(),
+                            PONG.as_bytes().to_vec(),
+                            BasicProperties::default().with_correlation_id(
+                                delivery.properties.correlation_id().clone().unwrap(),
+                            ),
+                        )
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+
+        queue
+    }
+
     pub async fn processed_deliveries(&self) -> Vec<Delivery> {
         self.processed_deliveries.lock().await.clone()
     }
